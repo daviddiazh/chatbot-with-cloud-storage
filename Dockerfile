@@ -1,0 +1,24 @@
+FROM node:20-alpine
+
+ARG ACC_SID
+ARG AUTH_TOKEN
+ARG VENDOR_NUMBER
+ARG TWILIO_KEY_API
+ARG GCP_PROJECT_ID
+ARG GCP_BUCKET_NAME
+ARG BACKEND_URL
+ARG SECRET_TEXT
+
+WORKDIR /usr/src/app
+
+COPY package*.json ./
+
+RUN npm install
+
+COPY . .
+
+RUN npm run build
+
+EXPOSE 3000
+
+CMD ["node", "dist/app.js"]
