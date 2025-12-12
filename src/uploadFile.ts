@@ -3,45 +3,54 @@ dotenv.config()
 
 import { Storage } from '@google-cloud/storage'
 import crypto from 'crypto'
-import { tmpdir } from 'os';
-import fs from 'fs'
 
-export const uploadFile = async (data: any, media: string) => {
+export const uploadFileFromBuffer = async (buffer: Buffer, extension: string, mimeType?: string) => {
+    const credentials = process.env.SECRET_TEXT 
+        ? JSON.parse(process.env.SECRET_TEXT)
+        : undefined;
+
     const storage = new Storage({
         projectId: process.env.GCP_PROJECT_ID,
-        keyFilename: `${__dirname}/../secrets.json`,
+        ...(credentials && { credentials })
     });
 
-    const filename = `${crypto.randomUUID()}.${media}`;
-    const tempFilePath = `${tmpdir()}/${filename}`;
+    const filename = `${crypto.randomUUID()}.${extension}`;
 
     try {
         const bucket = storage.bucket(process.env.GCP_BUCKET_NAME!);
+        const file = bucket.file(filename);
 
-        const writeStream = fs.createWriteStream(tempFilePath);
-
-        await new Promise((resolve, reject) => {
-        data.pipe(writeStream)
-            .on('error', reject)
-            .on('finish', async () => {
-                const resp = await bucket.upload(tempFilePath, {
-                    destination: filename,
-                });
-                resolve(resp);
-            });
+        const writeStream = file.createWriteStream({
+            metadata: {
+                contentType: mimeType || 'application/octet-stream',
+                cacheControl: 'public, max-age=31536000',
+            },
+            resumable: false,
         });
 
-        return { filename };
-    } catch (error: any) {
-        console.log({ error })
-        throw new error;
-    } 
-    finally {
+        await new Promise<void>((resolve, reject) => {
+            writeStream.on('error', (error: any) => {
+                reject(error);
+            });
+
+            writeStream.on('finish', () => {
+                resolve();
+            });
+
+            writeStream.end(buffer);
+        });
+
         try {
-          await fs.promises.unlink(tempFilePath);
-        } catch (err: any) {
-          console.error('Error deleting temporary file:', err);
-          throw new err;
+            await file.makePublic();
+        } catch (error: any) {
+            console.log('Bucket usa Uniform Bucket-Level Access - permisos controlados a nivel de bucket');
         }
+
+        const publicUrl = `https://storage.googleapis.com/${process.env.GCP_BUCKET_NAME}/${filename}`;
+
+        return { filename, publicUrl };
+    } catch (error: any) {
+        console.error('Error al subir archivo a GCP:', error);
+        throw error;
     }
 }
